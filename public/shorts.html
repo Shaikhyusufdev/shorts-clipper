@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shorts Clipper</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; background: #0f0f13; color: #eee; }
+  h1 { font-size: 22px; }
+  input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #1a1a1f; color: #eee; box-sizing: border-box; }
+  button { margin-top: 10px; padding: 10px 18px; border-radius: 8px; border: none; background: #6c5ce7; color: white; cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #status { margin-top: 16px; font-size: 14px; color: #aaa; }
+  .clip { margin-top: 14px; padding: 12px; background: #1a1a1f; border-radius: 10px; }
+  .clip video { width: 100%; border-radius: 8px; }
+  .clip h3 { margin: 6px 0 2px; font-size: 15px; }
+  .clip p { margin: 2px 0; font-size: 13px; color: #999; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; background: #333; font-size: 11px; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <h1>🎬 YouTube → 5 Shorts</h1>
+  <input id="url" placeholder="Paste YouTube video link..." />
+  <button id="go">Generate Shorts</button>
+  <div id="status"></div>
+  <div id="results"></div>
+
+<script>
+const goBtn = document.getElementById('go');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+
+goBtn.onclick = async () => {
+  const url = document.getElementById('url').value.trim();
+  if (!url) return;
+
+  goBtn.disabled = true;
+  resultsEl.innerHTML = '';
+  statusEl.textContent = 'Connecting...';
+
+  const jobId = 'job_' + Date.now();
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ jobId }));
+    fetch('/api/generate-shorts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, jobId })
+    }).catch(err => { statusEl.textContent = 'Error: ' + err.message; goBtn.disabled = false; });
+  };
+
+  ws.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    if (data.type === 'progress') {
+      statusEl.textContent = `[${data.percent | 0}%] ${data.msg}`;
+    } else if (data.type === 'done') {
+      statusEl.textContent = `Done! ${data.clips.length} clips ready.`;
+      goBtn.disabled = false;
+      data.clips.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'clip';
+        div.innerHTML = `
+          <video controls src="${c.url}"></video>
+          <span class="badge">${c.category}</span><span class="badge">score ${c.viral_score}/10</span>
+          <h3>${c.title}</h3>
+          <p>${c.reason}</p>
+        `;
+        resultsEl.appendChild(div);
+      });
+    } else if (data.type === 'error') {
+      statusEl.textContent = 'Error: ' + (data.msg || 'unknown error');
+      goBtn.disabled = false;
+    }
+  };
+
+  ws.onerror = () => { statusEl.textContent = 'WebSocket error'; goBtn.disabled = false; };
+};
+</script>
+</body>
+</html>
