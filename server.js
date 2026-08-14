@@ -30,6 +30,16 @@ function getCookiesArgs() {
   return [];
 }
 
+// YouTube's "n challenge" (anti-bot signature) needs a JS runtime to solve.
+// The node:20-slim base image already has Node.js — tell yt-dlp to use it
+// explicitly since auto-detection sometimes misses it. Also try the
+// android/web clients as a fallback, which historically dodge the
+// challenge more often than the default web client.
+const YTDLP_EXTRA_ARGS = [
+  '--js-runtimes', 'node',
+  '--extractor-args', 'youtube:player_client=android,web'
+];
+
 app.use(express.json());
 app.use(express.static('public'));
 app.use('/downloads', express.static(DOWNLOAD_DIR));
@@ -115,8 +125,9 @@ app.post('/api/info', (req, res) => {
 
   const cookieArgs = getCookiesArgs();
   const cookieFlag = cookieArgs.length ? `${cookieArgs[0]} "${cookieArgs[1]}"` : '';
+  const extraFlag = '--js-runtimes node --extractor-args "youtube:player_client=android,web"';
 
-  exec(`"${ytdlp}" --dump-json --no-playlist --remote-components ejs:github ${cookieFlag} "${url}"`, { timeout: 60000 }, (err, stdout, stderr) => {
+  exec(`"${ytdlp}" --dump-json --no-playlist --remote-components ejs:github ${extraFlag} ${cookieFlag} "${url}"`, { timeout: 60000 }, (err, stdout, stderr) => {
     if (err) {
       console.error('yt-dlp info error:', stderr || err.message);
       return res.status(500).json({ error: 'Could not fetch video info. Check the URL.' });
@@ -199,12 +210,12 @@ app.post('/api/download', (req, res) => {
 
   let args;
   if (ext === 'mp3') {
-    args = ['-x', '--audio-format', 'mp3', '--force-overwrites', '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...cookieArgs, '-o', outputTemplate];
+    args = ['-x', '--audio-format', 'mp3', '--force-overwrites', '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...YTDLP_EXTRA_ARGS, ...cookieArgs, '-o', outputTemplate];
     if (ffmpeg) args.push('--ffmpeg-location', ffmpeg);
   } else if (ffmpeg) {
-    args = ['-f', formatId, '--merge-output-format', 'mp4', '--force-overwrites', '--ffmpeg-location', ffmpeg, '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...cookieArgs, '-o', outputTemplate];
+    args = ['-f', formatId, '--merge-output-format', 'mp4', '--force-overwrites', '--ffmpeg-location', ffmpeg, '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...YTDLP_EXTRA_ARGS, ...cookieArgs, '-o', outputTemplate];
   } else {
-    args = ['-f', formatId, '--force-overwrites', '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...cookieArgs, '-o', outputTemplate];
+    args = ['-f', formatId, '--force-overwrites', '--no-playlist', '--newline', '--remote-components', 'ejs:github', ...YTDLP_EXTRA_ARGS, ...cookieArgs, '-o', outputTemplate];
   }
   args.push(url);
 
@@ -297,6 +308,7 @@ app.post('/api/generate-shorts', async (req, res) => {
         '--ffmpeg-location', ffmpeg,
         '--no-playlist', '--newline',
         '--remote-components', 'ejs:github',
+        ...YTDLP_EXTRA_ARGS,
         ...cookieArgs,
         '-o', sourceVideo,
         url
