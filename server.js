@@ -31,13 +31,13 @@ function getCookiesArgs() {
 }
 
 // YouTube's "n challenge" (anti-bot signature) needs a JS runtime to solve.
-// The node:20-slim base image already has Node.js — tell yt-dlp to use it
-// explicitly since auto-detection sometimes misses it. Also try the
-// android/web clients as a fallback, which historically dodge the
-// challenge more often than the default web client.
+// Deno (installed in the Dockerfile) is auto-prioritized by yt-dlp over
+// Node.js and solves this far more reliably inside containers — no flag
+// needed once it's on PATH. player_client order matters: "web" first
+// because it's the only client that reliably honors --cookies; mweb/android
+// are automatic fallbacks if web gets throttled.
 const YTDLP_EXTRA_ARGS = [
-  '--js-runtimes', 'node',
-  '--extractor-args', 'youtube:player_client=android,web'
+  '--extractor-args', 'youtube:player_client=web,mweb,android'
 ];
 
 app.use(express.json());
@@ -125,7 +125,7 @@ app.post('/api/info', (req, res) => {
 
   const cookieArgs = getCookiesArgs();
   const cookieFlag = cookieArgs.length ? `${cookieArgs[0]} "${cookieArgs[1]}"` : '';
-  const extraFlag = '--js-runtimes node --extractor-args "youtube:player_client=android,web"';
+  const extraFlag = '--extractor-args "youtube:player_client=web,mweb,android"';
 
   exec(`"${ytdlp}" --dump-json --no-playlist --remote-components ejs:github ${extraFlag} ${cookieFlag} "${url}"`, { timeout: 60000 }, (err, stdout, stderr) => {
     if (err) {
