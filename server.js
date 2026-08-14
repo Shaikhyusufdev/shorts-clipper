@@ -324,12 +324,19 @@ app.post('/api/generate-shorts', async (req, res) => {
       proc.on('close', code => code === 0 ? resolve() : reject(new Error(`yt-dlp failed: ${stderrBuf.slice(-500)}`)));
     });
 
-    // 2. Transcribe with faster-whisper
+    // 2. Transcribe with faster-whisper (chunked internally — see transcribe.py)
     send(jobId, { type: 'progress', stage: 'transcribe', percent: 35, msg: 'Transcribing audio...' });
     await new Promise((resolve, reject) => {
-      const proc = spawn(python, [path.join(__dirname, 'scripts', 'transcribe.py'), sourceVideo, transcriptPath, 'base']);
+      const proc = spawn(python, [path.join(__dirname, 'scripts', 'transcribe.py'), sourceVideo, transcriptPath, 'tiny']);
       let stderrBuf = '';
-      proc.stderr.on('data', d => { stderrBuf += d.toString(); });
+      proc.stderr.on('data', d => {
+        const line = d.toString();
+        stderrBuf += line;
+        const m = line.match(/Chunk (\d+)s-(\d+)s done/);
+        if (m) {
+          send(jobId, { type: 'progress', stage: 'transcribe', percent: 35, msg: `Transcribing... (${m[2]}s processed)` });
+        }
+      });
       proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Whisper failed: ${stderrBuf.slice(-500)}`)));
     });
 
