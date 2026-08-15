@@ -37,17 +37,17 @@ function cutClip({ ffmpegPath, sourceVideo, start, end, transcriptSegments, outp
     const srtPath = path.join(tmpDir, `${path.basename(outputPath, '.mp4')}.srt`);
     writeSrtForClip(transcriptSegments, start, end, srtPath);
 
-    // 9:16 center crop: scale up to cover a 720x1280 frame, then crop center.
-    // 720x1280 instead of 1080x1920 — same source (720p) has to upscale
-    // either way, but 720x1280 is ~55% fewer output pixels, which directly
-    // cuts x264 frame-buffer memory. Still plenty sharp for mobile Shorts.
+    // 9:16 center crop: scale up to cover a 1080x1920 frame, then crop center.
+    // (Back to full 1080x1920 now that transcription runs on Groq's servers
+    // instead of local whisper — that was the real memory hog on the
+    // free-tier instance, not this encode step.)
     // This is a simple MVP crop — swap for face-tracking (MediaPipe) later by
     // computing a per-frame crop-x offset and feeding it via a custom filter.
     const escapedSrt = srtPath.replace(/:/g, '\\:').replace(/'/g, "\\'");
     const vf = [
-      `scale=720:1280:force_original_aspect_ratio=increase`,
-      `crop=720:1280`,
-      `subtitles='${escapedSrt}':force_style='FontName=Arial,FontSize=14,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=2,Alignment=2,MarginV=60'`
+      `scale=1080:1920:force_original_aspect_ratio=increase`,
+      `crop=1080:1920`,
+      `subtitles='${escapedSrt}':force_style='FontName=Arial,FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=2,Alignment=2,MarginV=80'`
     ].join(',');
 
     const args = [
@@ -58,13 +58,10 @@ function cutClip({ ffmpegPath, sourceVideo, start, end, transcriptSegments, outp
       '-vf', vf,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
-      // ref=1/bframes=0 disable x264's multi-frame lookahead buffers — the
-      // single biggest encoder memory cost on a 512MB instance. Slightly
-      // less compression efficiency, not a visible quality hit at this size.
       '-x264-params', 'ref=1:bframes=0',
-      '-crf', '25',
+      '-crf', '22',
       '-c:a', 'aac',
-      '-b:a', '96k',
+      '-b:a', '128k',
       outputPath
     ];
 
