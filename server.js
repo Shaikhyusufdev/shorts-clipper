@@ -303,7 +303,7 @@ app.post('/api/generate-shorts', async (req, res) => {
     send(jobId, { type: 'progress', stage: 'download', percent: 5, msg: 'Downloading video...' });
     await new Promise((resolve, reject) => {
       const args = [
-        '-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]',
+        '-f', 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]',
         '--merge-output-format', 'mp4',
         '--ffmpeg-location', ffmpeg,
         '--no-playlist', '--newline',
