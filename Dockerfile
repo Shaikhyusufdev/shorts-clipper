@@ -15,6 +15,15 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     deno --version
 
+# Bake the "tiny" whisper model + its VAD (voice activity detection) model
+# into the image at build time. Without this, the first real request has to
+# download them from Hugging Face Hub at runtime — slow, and prone to
+# rate-limit/network failures on free-tier hosts (that HF_TOKEN warning you
+# saw). Baking them in means zero network dependency during actual use.
+RUN ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t 1 -y /tmp/warmup.wav && \
+    python3 -c "from faster_whisper import WhisperModel; m = WhisperModel('tiny', device='cpu', compute_type='int8'); list(m.transcribe('/tmp/warmup.wav', vad_filter=True)[0])" && \
+    rm /tmp/warmup.wav
+
 WORKDIR /app
 COPY package.json ./
 RUN npm install
