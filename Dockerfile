@@ -1,12 +1,16 @@
 FROM node:20-slim
 
-# System deps: python3, ffmpeg + build tools for faster-whisper.
+# System deps: python3 (yt-dlp needs it), ffmpeg (video processing).
 # unzip + ca-certificates are required by the Deno installer below.
+# No more faster-whisper/pip whisper model — transcription now goes through
+# Groq's hosted API instead of running locally, so we don't need the local
+# whisper model or its weight baked into this image anymore. Smaller image,
+# faster build, and no local CPU/RAM spent on transcription.
 RUN apt-get update && apt-get install -y \
     python3 python3-pip ffmpeg curl ca-certificates unzip \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/* && \
-    pip3 install --break-system-packages "yt-dlp[default]" faster-whisper && \
+    pip3 install --break-system-packages "yt-dlp[default]" && \
     yt-dlp --version
 
 # Deno solves YouTube's "n challenge" (anti-bot signature) far more reliably
@@ -14,15 +18,6 @@ RUN apt-get update && apt-get install -y \
 # node once it's on PATH, no extra flags needed.
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     deno --version
-
-# Bake the "tiny" whisper model + its VAD (voice activity detection) model
-# into the image at build time. Without this, the first real request has to
-# download them from Hugging Face Hub at runtime — slow, and prone to
-# rate-limit/network failures on free-tier hosts (that HF_TOKEN warning you
-# saw). Baking them in means zero network dependency during actual use.
-RUN ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t 1 -y /tmp/warmup.wav && \
-    python3 -c "from faster_whisper import WhisperModel; m = WhisperModel('tiny', device='cpu', compute_type='int8'); list(m.transcribe('/tmp/warmup.wav', vad_filter=True)[0])" && \
-    rm /tmp/warmup.wav
 
 WORKDIR /app
 COPY package.json ./
