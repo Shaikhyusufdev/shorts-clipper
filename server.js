@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 
 const { analyzeTranscript } = require('./scripts/analyze');
 const { cutClip } = require('./scripts/clipper');
+const { transcribeVideo } = require('./scripts/transcribe-groq');
 
 const app = express();
 const server = http.createServer(app);
@@ -54,6 +55,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { for (const [k, v] of jobs) if (v === ws) jobs.delete(k); });
 });
 function send(jobId, data) {
+  // Mirror to Render's own logs too — without this, the pipeline is
+  // completely invisible server-side (progress only went out over the
+  // WebSocket before), making it impossible to tell "stuck" from "slow".
+  console.log(`[${jobId}]`, data.msg || data.type);
   const ws = jobs.get(jobId);
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(data));
 }
@@ -285,10 +290,9 @@ app.post('/api/generate-shorts', async (req, res) => {
 
   const ytdlp = getYtDlp();
   const ffmpeg = getFfmpeg();
-  const python = getPython();
   if (!ytdlp) return res.status(500).json({ error: 'yt-dlp not found.' });
   if (!ffmpeg) return res.status(500).json({ error: 'ffmpeg not found.' });
-  if (!python) return res.status(500).json({ error: 'python3 not found.' });
+  if (!process.env.GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY not set — required for transcription.' });
 
   // Respond immediately; do the real work async and push progress over WebSocket.
   res.json({ success: true, jobId, msg: 'Job started.' });
@@ -303,7 +307,7 @@ app.post('/api/generate-shorts', async (req, res) => {
     send(jobId, { type: 'progress', stage: 'download', percent: 5, msg: 'Downloading video...' });
     await new Promise((resolve, reject) => {
       const args = [
-        '-f', 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]',
+        '-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]',
         '--merge-output-format', 'mp4',
         '--ffmpeg-location', ffmpeg,
         '--no-playlist', '--newline',
@@ -324,20 +328,13 @@ app.post('/api/generate-shorts', async (req, res) => {
       proc.on('close', code => code === 0 ? resolve() : reject(new Error(`yt-dlp failed: ${stderrBuf.slice(-2000)}`)));
     });
 
-    // 2. Transcribe with faster-whisper (chunked internally — see transcribe.py)
+    // 2. Transcribe via Groq's hosted Whisper API — off Render's weak
+    // free-tier CPU entirely, faster, and much more accurate on
+    // Hindi/Hinglish audio than the local "tiny" model was.
     send(jobId, { type: 'progress', stage: 'transcribe', percent: 35, msg: 'Transcribing audio...' });
-    await new Promise((resolve, reject) => {
-      const proc = spawn(python, [path.join(__dirname, 'scripts', 'transcribe.py'), sourceVideo, transcriptPath, 'tiny']);
-      let stderrBuf = '';
-      proc.stderr.on('data', d => {
-        const line = d.toString();
-        stderrBuf += line;
-        const m = line.match(/Chunk (\d+)s-(\d+)s done/);
-        if (m) {
-          send(jobId, { type: 'progress', stage: 'transcribe', percent: 35, msg: `Transcribing... (${m[2]}s processed)` });
-        }
-      });
-      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Whisper failed: ${stderrBuf.slice(-2000)}`)));
+    await transcribeVideo(sourceVideo, transcriptPath, (done, total) => {
+      const pct = 35 + Math.round((done / total) * 20); // occupies the 35-55% range
+      send(jobId, { type: 'progress', stage: 'transcribe', percent: pct, msg: `Transcribing... (${Math.round(done)}s / ${Math.round(total)}s)` });
     });
 
     const transcript = JSON.parse(fs.readFileSync(transcriptPath, 'utf-8'));
