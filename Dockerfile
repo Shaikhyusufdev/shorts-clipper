@@ -34,5 +34,8 @@ EXPOSE 3000
 
 # yt-dlp -U self-updates on every boot so we don't need to rebuild the image
 # every time YouTube changes its player JS (which breaks the n-challenge
-# solver every few weeks). Adds ~2-3s to cold start, worth it.
-CMD ["sh", "-c", "yt-dlp -U || true; node server.js"]
+# solver every few weeks). Output is silenced — GitHub's API rate-limits
+# unauthenticated checks fairly often on shared free-tier IPs, which isn't
+# an actual problem (we just skip the update that boot and carry on), but
+# was showing up as a scary-looking red "ERROR" line in the logs.
+CMD ["sh", "-c", "yt-dlp -U > /dev/null 2>&1 || true; node server.js"]
