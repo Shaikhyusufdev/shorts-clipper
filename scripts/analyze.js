@@ -55,7 +55,11 @@ function buildPrompt(transcriptSegments, videoDuration) {
 
   return `You are an expert short-form video editor. Below is a timestamped transcript of a ${Math.round(videoDuration)}s video.
 
-Identify the 5 BEST moments to turn into standalone vertical Shorts (each clip should be 20-60 seconds long, self-contained, and make sense without the rest of the video).
+Identify the 5 BEST moments to turn into standalone vertical Shorts.
+
+STRICT DURATION RULE: every clip MUST be between 25 and 60 seconds long (end - start). Never pick a moment shorter than 25 seconds — if a great line is short, WIDEN the clip to include the setup/reaction around it so it's self-contained AND at least 25 seconds. Prefer 30-45 seconds as the sweet spot. Do not exceed 60 seconds.
+
+Each clip should make sense on its own without the rest of the video — include enough surrounding context (a question before the answer, a reaction after the punchline, etc.) rather than cutting right at the interesting word.
 
 For each moment, pick a real start/end timestamp from the transcript (do not invent timestamps outside the transcript's range) and classify it into ONE category: "hook", "funny", "surprising", "educational", "emotional".
 
@@ -77,6 +81,31 @@ Transcript:
 ${transcriptText}`;
 }
 
+// Safety net in case the LLM doesn't fully respect the duration instructions:
+// widen any clip under MIN_DURATION by pulling in surrounding transcript
+// context symmetrically, and trim anything over MAX_DURATION.
+const MIN_DURATION = 25;
+const MAX_DURATION = 60;
+
+function enforceDurationBounds(clips, videoDuration) {
+  return clips.map(clip => {
+    let { start, end } = clip;
+    let dur = end - start;
+
+    if (dur < MIN_DURATION) {
+      const need = MIN_DURATION - dur;
+      start = Math.max(0, start - need / 2);
+      end = Math.min(videoDuration, start + MIN_DURATION);
+      // if we hit the video's start/end boundary, pull the rest from the other side
+      start = Math.max(0, end - MIN_DURATION);
+    } else if (dur > MAX_DURATION) {
+      end = start + MAX_DURATION;
+    }
+
+    return { ...clip, start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100 };
+  });
+}
+
 async function analyzeTranscript(transcriptSegments, videoDuration) {
   const prompt = buildPrompt(transcriptSegments, videoDuration);
   const errors = [];
@@ -90,7 +119,8 @@ async function analyzeTranscript(transcriptSegments, videoDuration) {
       if (!parsed.clips || !Array.isArray(parsed.clips)) {
         throw new Error('Malformed response: missing clips array');
       }
-      return { provider: provider.name, clips: parsed.clips.slice(0, 5) };
+      const clips = enforceDurationBounds(parsed.clips.slice(0, 5), videoDuration);
+      return { provider: provider.name, clips };
     } catch (e) {
       errors.push(`${provider.name}: ${e.message}`);
       continue; // try next provider
