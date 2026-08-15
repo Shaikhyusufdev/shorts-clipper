@@ -321,7 +321,7 @@ app.post('/api/generate-shorts', async (req, res) => {
         if (m) send(jobId, { type: 'progress', stage: 'download', percent: 5 + parseFloat(m[1]) * 0.25, msg: `Downloading... ${m[1]}%` });
       });
       proc.stderr.on('data', d => { stderrBuf += d.toString(); });
-      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`yt-dlp failed: ${stderrBuf.slice(-500)}`)));
+      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`yt-dlp failed: ${stderrBuf.slice(-2000)}`)));
     });
 
     // 2. Transcribe with faster-whisper (chunked internally — see transcribe.py)
@@ -337,7 +337,7 @@ app.post('/api/generate-shorts', async (req, res) => {
           send(jobId, { type: 'progress', stage: 'transcribe', percent: 35, msg: `Transcribing... (${m[2]}s processed)` });
         }
       });
-      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Whisper failed: ${stderrBuf.slice(-500)}`)));
+      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Whisper failed: ${stderrBuf.slice(-2000)}`)));
     });
 
     const transcript = JSON.parse(fs.readFileSync(transcriptPath, 'utf-8'));
